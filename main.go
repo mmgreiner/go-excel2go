@@ -2,11 +2,14 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"log"
 	"os"
 
 	"regexp"
 	"time"
+
+	"path/filepath"
 
 	"text/template"
 
@@ -60,24 +63,34 @@ func main() {
 
 	flag.StringVar(&info.PackageName, "package", "MyPackage", "name of the package")
 	flag.StringVar(&info.TypeName, "type", "MyType", "name of the type struct")
+	outfn := flag.String("out", "stdout", "output file name or stdout")
 	/*
 		flNumeric := flag.String("Numberic", "No,Nr,Amount", "List of header names indicating numbers")
 		flDate := flag.String("Date", "Date,Created,Modified", "list of header names indicating a date")
 		flBool := flag.Bool("Bool", "", "list of header names indicating boolean")
 	*/
-	infile := os.Stdin
+
+	flag.Usage = func() {
+		w := flag.CommandLine.Output()
+		_, fn := filepath.Split(os.Args[0])
+		fmt.Fprintln(w, "Purpose: Read the first sheet of the given excel xlsx file which has aheader row and then data, and converts it to a golang type structure.")
+		fmt.Fprintf(w, "Usage: %s [-options] excel-file\n", fn)
+		fmt.Fprintln(w, "Options:")
+		flag.PrintDefaults()
+	}
 	var err error
 
 	flag.Parse()
-	if len(flag.Args()) > 0 {
-		info.FileName = flag.Arg(0)
-		log.Println("reading from", info.FileName)
-		infile, err = os.Open(info.FileName)
-		if err != nil {
-			panic(err)
-		}
-	} else {
-		log.Println("not input file given, using stdin")
+	if len(flag.Args()) < 1 {
+		flag.Usage()
+		os.Exit(0)
+	}
+
+	info.FileName = flag.Arg(0)
+	log.Println("reading from", info.FileName)
+	infile, err := os.Open(info.FileName)
+	if err != nil {
+		panic(err)
 	}
 
 	f, err := excelize.OpenReader(infile)
@@ -95,7 +108,8 @@ func main() {
 
 	guessTypes(f, info.Fields)
 
-	generateCode(info)
+	log.Println("generating code to ", outfn)
+	generateCode(*outfn, info)
 
 }
 
@@ -199,7 +213,7 @@ func ReadCsv(fn string) []{{.TypeName}} {
 }
 `
 
-func generateCode(info TemplateInfo) {
+func generateCode(outfn string, info TemplateInfo) {
 	// now create a golang struct from it
 
 	tmpl, err := template.New("mytemp").Parse(templText)
@@ -207,10 +221,18 @@ func generateCode(info TemplateInfo) {
 		panic(err)
 	}
 
-	err = tmpl.Execute(os.Stdout, info)
+	out := os.Stdout
+	if outfn != "stdout" {
+		out, err = os.Create(outfn)
+		if err != nil {
+			panic(err)
+		}
+	}
+	defer out.Close()
+
+	log.Println("writing to ", outfn)
+	err = tmpl.Execute(out, info)
 	if err != nil {
 		panic(err)
 	}
-	os.Stdout.Close()
-
 }
